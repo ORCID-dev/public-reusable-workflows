@@ -6,6 +6,7 @@ Reusable GitHub Actions workflows for ORCID's public repos.
 |---|---|---|---|
 | `lint.yml` | `pre-commit` | `contents: read` | `pre-commit run --all-files` |
 | `sast.yml` | `semgrep` | `contents: read` | `semgrep ci`, plus Maven dependency trees when `java-version` is set |
+| `version.yml` | `version` | `contents: read` | Next `vX.Y.Z` from the latest tag; outputs `version`, `tag`, `last-tag` |
 
 ## Usage
 
@@ -19,6 +20,7 @@ Inputs and defaults:
 
 - `lint.yml`: `python-version` (`3.13`), `timeout-minutes` (`15`).
 - `sast.yml`: `java-version` (empty), `split` (`false`), `quiet` (`true`), `timeout-minutes` (`30`). Secret `semgrep-app-token`; without it the scan is skipped.
+- `version.yml`: `bump` (`patch`; `minor`, `major` or `none`), `version` (explicit, skips the bump). `#minor` or `#major` in a merged commit subject raises the bump.
 
 Check names are `<caller job> / <job>`, e.g. `lint / pre-commit`. Don't rename either while the check is required.
 
