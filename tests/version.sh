@@ -3,7 +3,7 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-script=$(python3 "$root/tests/extract-version-script.py" "$root/.github/workflows/version.yml")
+script=$(python3 "$root/tests/extract-run.py" "$root/.github/workflows/version.yml" version)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 failed=0

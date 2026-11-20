@@ -22,6 +22,8 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/sast.yml # zizmor: ignore[self-repository]
+    with:
+      java-version: '21'
     secrets:
       semgrep-app-token: ${{ secrets.SEMGREP_APP_TOKEN }}
 
@@ -44,6 +46,30 @@ jobs:
           test -n "$VERSION" && test "$TAG" = "v$VERSION" && test -n "$LAST"
           echo "$LAST -> $TAG"
 
+  build:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build.yml # zizmor: ignore[self-repository]
+    with:
+      name: build
+      modules: '["lib", "app"]'
+      java-version: '21'
+      run: |
+        test -n "$FIXTURE_TOKEN"
+        mvn -f fixtures/maven/pom.xml -pl "$MODULE" -am verify
+    secrets:
+      env-vars: FIXTURE_TOKEN=${{ secrets.GITHUB_TOKEN }}
+
+  maven-cache:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build.yml # zizmor: ignore[self-repository]
+    with:
+      name: maven-cache
+      java-version: '21'
+      maven-cache: save
+      run: mvn -f fixtures/maven/pom.xml verify
+
   test:
     permissions:
       contents: read
@@ -58,6 +84,7 @@ jobs:
           persist-credentials: false
       - run: shellcheck tests/*.sh
       - run: bash tests/version.sh
+      - run: bash tests/build.sh
 
   zizmor:
     permissions:
