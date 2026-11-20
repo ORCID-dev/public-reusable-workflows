@@ -8,7 +8,7 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 src=$(cd "$1" && pwd)
 count=${2:-150}
-script=$(python3 "$root/tests/extract-version-script.py" "$root/.github/workflows/version.yml")
+script=$(python3 "$root/tests/extract-run.py" "$root/.github/workflows/version.yml" version)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 git clone -q --bare --shared "$src" "$work/repo.git"
