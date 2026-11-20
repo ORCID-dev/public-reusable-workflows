@@ -22,6 +22,35 @@ jobs:
     secrets:
       semgrep-app-token: ${{ secrets.SEMGREP_APP_TOKEN }}
 
+  version:
+    uses: ./.github/workflows/version.yml # zizmor: ignore[self-repository]
+
+  version-outputs:
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TAG: ${{ needs.version.outputs.tag }}
+          LAST: ${{ needs.version.outputs.last-tag }}
+        run: |
+          test -n "$VERSION" && test "$TAG" = "v$VERSION" && test -n "$LAST"
+          echo "$LAST -> $TAG"
+
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: shellcheck tests/*.sh
+      - run: bash tests/version.sh
+
   zizmor:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
