@@ -1,0 +1,36 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    "customManagers:githubActionsVersions",
+    ":enablePreCommit"
+  ],
+  "enabledManagers": ["github-actions", "custom.regex", "pre-commit"],
+  "schedule": ["before 6am on monday"],
+  "minimumReleaseAge": "5 days",
+  "prConcurrentLimit": 3,
+  "vulnerabilityAlerts": {
+    "schedule": ["at any time"],
+    "commitMessagePrefix": "fix(security):"
+  },
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "ci tooling",
+      "commitMessagePrefix": "chore(deps):"
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "commitMessagePrefix": "chore(deps):",
+      "dependencyDashboardApproval": true
+    },
+    {
+      "matchPackageNames": [
+        "ORCID-dev/public-reusable-workflows",
+        "ORCID/public-reusable-workflows"
+      ],
+      "enabled": false
+    }
+  ]
+}
