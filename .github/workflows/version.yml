@@ -1,0 +1,82 @@
+name: version
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Explicit version (3.25.10, 3.25.10-p1). Skips the bump.
+        type: string
+        default: ''
+      bump:
+        description: patch, minor, major or none.
+        type: string
+        default: patch
+    outputs:
+      version:
+        value: ${{ jobs.version.outputs.version }}
+      tag:
+        value: ${{ jobs.version.outputs.tag }}
+      last-tag:
+        value: ${{ jobs.version.outputs.last-tag }}
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      last-tag: ${{ steps.version.outputs.last-tag }}
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 100
+          persist-credentials: false
+      # tests/version.sh runs this script; keep the id and the block scalar.
+      - id: version
+        env:
+          VERSION: ${{ inputs.version }}
+          BUMP: ${{ inputs.bump }}
+        run: |
+          last=${LAST_TAG:-$(git ls-remote --tags --refs origin 'v*' | sed 's|.*refs/tags/||' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)}
+          last=${last:-v0.0.0}
+          if [ -n "$VERSION" ]; then
+            if ! [[ $VERSION =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+              echo "::error::Invalid version: $VERSION"
+              exit 1
+            fi
+            tag=v${VERSION#v}
+          else
+            # Commits since the second-latest merge: the merged PR plus its merge commit.
+            base=$(git log --merges --grep='^Merge' --format=%H -n 2 | tail -n1)
+            subjects=$(git log --format=%s ${base:+"$base"..}HEAD)
+            bump=$BUMP
+            if [ "$bump" != none ]; then
+              if [[ $subjects == *'#major'* ]]; then
+                bump=major
+              elif [[ $subjects == *'#minor'* && $bump != major ]]; then
+                bump=minor
+              fi
+            fi
+            IFS=. read -r major minor patch <<< "${last#v}"
+            case $bump in
+              major) major=$((major + 1)) minor=0 patch=0 ;;
+              minor) minor=$((minor + 1)) patch=0 ;;
+              patch) patch=$((patch + 1)) ;;
+              none) ;;
+              *) echo "::error::Invalid bump: $bump"; exit 1 ;;
+            esac
+            tag=v$major.$minor.$patch
+          fi
+          {
+            echo "last-tag=$last"
+            echo "tag=$tag"
+            echo "version=${tag#v}"
+          } >> "$GITHUB_OUTPUT"
+          echo "$last -> $tag"
