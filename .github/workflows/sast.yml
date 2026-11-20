@@ -22,11 +22,12 @@ on:
       semgrep-app-token:
         required: false
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   semgrep:
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
