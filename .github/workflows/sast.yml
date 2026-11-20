@@ -52,7 +52,18 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
-          cache: maven
+
+      # Restore only, newest cache saved by build.yml.
+      - if: env.HAS_TOKEN == 'true' && inputs.java-version != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.m2/repository
+            !~/.m2/repository/org/orcid
+          key: maven-${{ runner.os }}-${{ hashFiles('./**/pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-${{ hashFiles('./**/pom.xml') }}-
+            maven-${{ runner.os }}-
 
       # Top-level POMs only: a reactor build covers its own modules.
       - if: env.HAS_TOKEN == 'true' && inputs.java-version != ''
