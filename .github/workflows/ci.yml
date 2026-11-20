@@ -5,8 +5,7 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -14,19 +13,26 @@ concurrency:
 
 jobs:
   lint:
+    permissions:
+      contents: read
     # $/ syntax not supported by actionlint 1.7.12 yet
     uses: ./.github/workflows/lint.yml # zizmor: ignore[self-repository]
 
   sast:
+    permissions:
+      contents: read
     uses: ./.github/workflows/sast.yml # zizmor: ignore[self-repository]
     secrets:
       semgrep-app-token: ${{ secrets.SEMGREP_APP_TOKEN }}
 
   version:
+    permissions:
+      contents: read
     uses: ./.github/workflows/version.yml # zizmor: ignore[self-repository]
 
   version-outputs:
     needs: version
+    permissions: {}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -39,6 +45,8 @@ jobs:
           echo "$LAST -> $TAG"
 
   test:
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -52,6 +60,8 @@ jobs:
       - run: bash tests/version.sh
 
   zizmor:
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:

@@ -19,11 +19,12 @@ on:
       last-tag:
         value: ${{ jobs.version.outputs.last-tag }}
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   version:
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:

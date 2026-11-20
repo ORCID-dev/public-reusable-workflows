@@ -10,12 +10,13 @@ on:
         type: number
         default: 15
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   # Job name is part of the required check `lint / pre-commit`.
   pre-commit:
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
