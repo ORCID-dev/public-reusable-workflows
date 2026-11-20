@@ -1,0 +1,92 @@
+name: sast
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: Set to generate Maven dependency trees for Semgrep Supply Chain.
+        type: string
+        default: ''
+      split:
+        description: Run supply chain and code scans separately.
+        type: boolean
+        default: false
+      quiet:
+        description: Keep findings out of the job log.
+        type: boolean
+        default: true
+      timeout-minutes:
+        type: number
+        default: 30
+    secrets:
+      semgrep-app-token:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  semgrep:
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      # renovate: datasource=pypi depName=semgrep
+      SEMGREP_VERSION: 1.185.0
+      HAS_TOKEN: ${{ secrets.semgrep-app-token != '' }}
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+
+      - if: env.HAS_TOKEN != 'true'
+        run: echo "::notice::No Semgrep token, scan skipped."
+
+      - if: env.HAS_TOKEN == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: env.HAS_TOKEN == 'true' && inputs.java-version != ''
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+          cache: maven
+
+      # Top-level POMs only: a reactor build covers its own modules.
+      - if: env.HAS_TOKEN == 'true' && inputs.java-version != ''
+        run: |
+          find . -name pom.xml -not -path '*/target/*' -not -path '*/node_modules/*' | sort | while read -r pom; do
+            parent=$(dirname "$pom")
+            nested=false
+            while [ "$parent" != "." ]; do
+              parent=$(dirname "$parent")
+              if [ -f "$parent/pom.xml" ]; then nested=true; break; fi
+            done
+            if [ "$nested" = false ]; then
+              mvn -B -ntp -q -f "$pom" dependency:tree -DoutputFile=maven_dep_tree.txt
+            fi
+          done
+
+      - if: env.HAS_TOKEN == 'true'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+
+      - if: env.HAS_TOKEN == 'true'
+        run: python -m pip install --disable-pip-version-check "semgrep==${SEMGREP_VERSION}"
+
+      - if: env.HAS_TOKEN == 'true'
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.semgrep-app-token }}
+          SPLIT: ${{ inputs.split }}
+          QUIET: ${{ inputs.quiet }}
+        run: |
+          out=/dev/stdout
+          if [ "$QUIET" = true ]; then out=/dev/null; fi
+          if [ "$SPLIT" = true ]; then
+            semgrep ci --supply-chain >"$out" 2>&1
+            semgrep ci --code >"$out" 2>&1
+          else
+            semgrep ci >"$out" 2>&1
+          fi
