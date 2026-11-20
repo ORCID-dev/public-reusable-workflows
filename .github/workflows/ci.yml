@@ -70,6 +70,28 @@ jobs:
       cache: save
       run: mvn -f fixtures/maven/pom.xml verify
 
+  node-yarn:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build.yml # zizmor: ignore[self-repository]
+    with:
+      name: node-yarn
+      node-version: '24'
+      cache: save
+      working-directory: fixtures/node-yarn
+      run: test "$(node -p "require('ms')(60000)")" = 1m
+
+  node-npm:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build.yml # zizmor: ignore[self-repository]
+    with:
+      name: node-npm
+      node-version: '24'
+      cache: save
+      working-directory: fixtures/node-npm
+      run: test "$(node -p "require('ms')(60000)")" = 1m
+
   test:
     permissions:
       contents: read
