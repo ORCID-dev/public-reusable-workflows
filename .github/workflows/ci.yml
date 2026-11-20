@@ -17,6 +17,11 @@ jobs:
     # $/ syntax not supported by actionlint 1.7.12 yet
     uses: ./.github/workflows/lint.yml # zizmor: ignore[self-repository]
 
+  sast:
+    uses: ./.github/workflows/sast.yml # zizmor: ignore[self-repository]
+    secrets:
+      semgrep-app-token: ${{ secrets.SEMGREP_APP_TOKEN }}
+
   zizmor:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
