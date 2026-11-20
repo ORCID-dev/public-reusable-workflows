@@ -67,7 +67,7 @@ jobs:
     with:
       name: maven-cache
       java-version: '21'
-      maven-cache: save
+      cache: save
       run: mvn -f fixtures/maven/pom.xml verify
 
   test:

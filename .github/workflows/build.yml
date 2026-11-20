@@ -33,7 +33,7 @@ on:
       python-version:
         type: string
         default: ''
-      maven-cache:
+      cache:
         description: restore, save (one job only; saves on the default branch after a miss) or none.
         type: string
         default: restore
@@ -97,7 +97,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       # Weekly key: an exact hit is never re-saved, so the week bounds how stale a cache gets.
-      - if: inputs.java-version != '' && inputs.maven-cache != 'none'
+      - if: inputs.java-version != '' && inputs.cache != 'none'
         id: maven-key
         env:
           POM_HASH: ${{ hashFiles(format('{0}/**/pom.xml', inputs.working-directory)) }}
@@ -117,6 +117,77 @@ jobs:
           restore-keys: |
             ${{ steps.maven-key.outputs.prefix }}
             maven-${{ runner.os }}-
+
+      # OS release and Node ABI in the node_modules key: native binaries depend on both.
+      - if: inputs.node-version != '' || inputs.node-version-file != ''
+        id: node
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          LOCK_HASH: ${{ hashFiles(format('{0}/yarn.lock', inputs.working-directory), format('{0}/package-lock.json', inputs.working-directory)) }}
+        run: |
+          if [ -f yarn.lock ]; then
+            pm=yarn dir=$(yarn cache dir)
+          elif [ -f package-lock.json ]; then
+            pm=npm dir=$(npm config get cache)
+          else
+            exit 0
+          fi
+          . /etc/os-release
+          os="$ID$VERSION_ID-$RUNNER_ARCH"
+          {
+            echo "pm=$pm"
+            echo "dir=$dir"
+            echo "prefix=$pm-$os-"
+            echo "key=$pm-$os-$LOCK_HASH"
+            echo "modules-key=node-modules-$os-abi$(node -p process.versions.modules)-$LOCK_HASH"
+          } >> "$GITHUB_OUTPUT"
+
+      # yarn only, npm ci deletes node_modules. Exact key only: a tree from another lockfile can keep stale packages.
+      - if: steps.node.outputs.pm == 'yarn' && inputs.cache != 'none'
+        id: node-modules
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ inputs.working-directory }}/node_modules
+          key: ${{ steps.node.outputs.modules-key }}
+
+      # A partial download cache still helps: the package manager checks every package against the lockfile.
+      - if: steps.node.outputs.pm != '' && inputs.cache != 'none' && steps.node-modules.outputs.cache-hit != 'true'
+        id: node-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.node.outputs.dir }}
+          key: ${{ steps.node.outputs.key }}
+          restore-keys: ${{ steps.node.outputs.prefix }}
+
+      # Before env-vars are exported, so install scripts never see the secrets.
+      - if: steps.node.outputs.pm != ''
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          PM: ${{ steps.node.outputs.pm }}
+        run: |
+          if [ "$PM" = yarn ]; then
+            yarn install --frozen-lockfile --non-interactive
+          else
+            npm ci --no-audit --no-fund
+          fi
+
+      - if: >-
+          inputs.cache == 'save' && steps.node.outputs.pm == 'yarn' &&
+          steps.node-modules.outputs.cache-hit != 'true' &&
+          github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ inputs.working-directory }}/node_modules
+          key: ${{ steps.node.outputs.modules-key }}
+
+      - if: >-
+          inputs.cache == 'save' && steps.node.outputs.pm != '' &&
+          steps.node-modules.outputs.cache-hit != 'true' && steps.node-cache.outputs.cache-hit != 'true' &&
+          github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.node.outputs.dir }}
+          key: ${{ steps.node.outputs.key }}
 
       - id: run
         working-directory: ${{ inputs.working-directory }}
@@ -141,7 +212,7 @@ jobs:
           bash -eo pipefail -c "$RUN"
 
       - if: >-
-          inputs.maven-cache == 'save' && steps.maven-key.outputs.key != '' &&
+          inputs.cache == 'save' && steps.maven-key.outputs.key != '' &&
           steps.maven-cache.outputs.cache-hit != 'true' &&
           github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
