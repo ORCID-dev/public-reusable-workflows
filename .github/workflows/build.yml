@@ -16,8 +16,9 @@ on:
         type: string
         default: '[""]'
       fail-fast:
+        description: Cancel the other modules when one fails. Off by default, so every failure shows at once and only the failed ones need a re-run.
         type: boolean
-        default: true
+        default: false
       version:
         description: Exported as VERSION.
         type: string
