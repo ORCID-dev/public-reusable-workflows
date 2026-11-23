@@ -61,7 +61,9 @@ jobs:
           if [ -n "$PREVIOUS" ] && gh api "repos/$GH_REPO/git/ref/tags/$PREVIOUS" > /dev/null 2>&1; then
             notes+=(--notes-start-tag "$PREVIOUS")
           fi
-          current=$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha 2> /dev/null || true)
+          # An unknown tag is a 422 with the error body on stdout: trust the exit status, not the output.
+          current=
+          if out=$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha 2> /dev/null); then current=$out; fi
           if [ -z "$current" ]; then
             gh release create "$TAG" --target "$SHA" "${notes[@]}"
           elif [ "$current" != "$SHA" ]; then
