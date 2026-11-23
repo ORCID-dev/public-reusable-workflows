@@ -92,6 +92,28 @@ jobs:
       working-directory: fixtures/node-npm
       run: test "$(node -p "require('ms')(60000)")" = 1m
 
+  node-pnpm:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build.yml # zizmor: ignore[self-repository]
+    with:
+      name: node-pnpm
+      node-version: '24'
+      cache: save
+      working-directory: fixtures/node-pnpm
+      run: test "$(node -p "require('ms')(60000)")" = 1m
+
+  docker:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/docker.yml # zizmor: ignore[self-repository]
+    with:
+      name: docker
+      images: '[{"name": "fixture/hello", "file": "fixtures/docker/Dockerfile"}]'
+      context: fixtures/docker
+      version: 0.0.0
+      build-args: GREETING=ci
+
   test:
     permissions:
       contents: read
@@ -107,6 +129,10 @@ jobs:
       - run: shellcheck tests/*.sh
       - run: bash tests/version.sh
       - run: bash tests/build.sh
+      - run: bash tests/docker.sh
+      - run: bash tests/release.sh
+      - run: bash tests/pages.sh
+      - run: bash tests/transifex.sh
 
   zizmor:
     permissions:
