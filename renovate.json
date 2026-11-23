@@ -47,6 +47,13 @@
       "dependencyDashboardApproval": true
     },
     {
+      "description": "A new Python minor waits for approval, until Semgrep supports it",
+      "matchDepNames": ["python"],
+      "matchUpdateTypes": ["minor"],
+      "groupName": "python",
+      "dependencyDashboardApproval": true
+    },
+    {
       "matchPackageNames": [
         "ORCID-dev/public-reusable-workflows",
         "ORCID/public-reusable-workflows"
