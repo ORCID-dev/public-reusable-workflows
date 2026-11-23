@@ -1,0 +1,31 @@
+name: gate
+
+on:
+  workflow_call:
+    inputs:
+      needs:
+        description: toJSON(needs) of the caller job. Fails unless every job in it succeeded or was skipped.
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: step-security/harden-runner@aebdcf6156ab6691adf63218240e476564a1ed4c # v2.23.0
+        with:
+          egress-policy: audit
+
+      # tests/gate.sh runs this script; keep the id and the block scalar.
+      - id: gate
+        env:
+          NEEDS: ${{ inputs.needs }}
+        run: |
+          bad=$(jq -r '[to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key)=\(.value.result)"] | join(" ")' <<< "$NEEDS")
+          if [ -n "$bad" ]; then
+            echo "::error::Not green: $bad"
+            exit 1
+          fi

@@ -12,6 +12,7 @@ Reusable workflows for ORCID's public repos. Consuming repos add a thin caller. 
 | `release.yml` | `push` | tag and GitHub Release |
 | `pages.yml` | `push`, `pull_request` | publish a site to `gh-pages` |
 | `transifex.yml` | `schedule`, `push` | pull translations into a PR, push source strings |
+| `gate.yml` | `pull_request` | one required check for all the jobs |
 
 Inputs and defaults are at the top of each workflow file.
 
@@ -36,6 +37,14 @@ jobs:
       modules: '["orcid-core", "orcid-web"]'
       java-version: '21'
       run: mvn -T 1C verify --projects "$MODULE" --also-make
+
+  ok:
+    if: always()
+    needs: [lint, test]
+    permissions: {}
+    uses: ORCID-dev/public-reusable-workflows/.github/workflows/gate.yml@v1
+    with:
+      needs: ${{ toJSON(needs) }}
 ```
 
 ## Release
@@ -151,7 +160,9 @@ jobs:
 - Caches are saved only by the job with `cache: save`, on the default branch.
 - Secrets for `run` go in `env-vars` as `KEY=value` lines. They are masked.
 - Outside the ORCID org, images go under `vd_test/`, and Slack and Transifex pushes are skipped.
-- Check names are `<caller job> / <job>`. Renaming either breaks a required check.
+- Require only `ok / gate` in the branch rules. It follows every job in `needs`, so adding, renaming or removing a job never touches the rules. Keep `if: always()`: without it a failed job skips the gate, and a skipped check counts as passing.
+- Check names are `<caller job> / <job>`.
+- Modules run independently: a failure doesn't cancel the others. Set `fail-fast: true` to change that.
 - Callers set `concurrency`. Don't cancel a running release.
 
 ## Versioning
