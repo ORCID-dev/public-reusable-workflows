@@ -1,0 +1,127 @@
+name: pages
+
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        description: Artifact with the built site, e.g. from build.yml `upload`.
+        type: string
+        required: true
+      directory:
+        description: Where the site goes in the branch; `.` is the root. Its old content is removed.
+        type: string
+        default: .
+      keep:
+        description: Top-level entries of `directory` to keep, one per line, e.g. `runway` for PR previews.
+        type: string
+        default: ''
+      branch:
+        type: string
+        default: gh-pages
+      environment:
+        description: Deployment environment, e.g. one with required reviewers.
+        type: string
+        default: ''
+      message:
+        description: Commit message.
+        type: string
+        default: ''
+      timeout-minutes:
+        type: number
+        default: 10
+    outputs:
+      url:
+        description: Published URL on github.io.
+        value: ${{ jobs.publish.outputs.url }}
+
+permissions: {}
+
+jobs:
+  publish:
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    environment: ${{ inputs.environment }}
+    outputs:
+      url: ${{ steps.publish.outputs.url }}
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.artifact }}
+          path: ${{ runner.temp }}/site
+
+      # Only copies files: no project code runs with the write token.
+      - id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTENT: ${{ runner.temp }}/site
+          DIRECTORY: ${{ inputs.directory }}
+          KEEP: ${{ inputs.keep }}
+          BRANCH: ${{ inputs.branch }}
+          MESSAGE: ${{ inputs.message }}
+          EVENT: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [[ $EVENT == pull_request* ]] && [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+            echo "::notice::No publish from a fork"
+            exit 0
+          fi
+          segment='[A-Za-z0-9_][A-Za-z0-9._-]*'
+          if [ "$DIRECTORY" != . ] && ! [[ $DIRECTORY =~ ^$segment(/$segment)*$ ]]; then
+            echo "::error::Invalid directory: $DIRECTORY"
+            exit 1
+          fi
+          while IFS= read -r name; do
+            if [ -n "$name" ] && ! [[ $name =~ ^$segment$ ]]; then
+              echo "::error::Invalid keep entry: $name"
+              exit 1
+            fi
+          done <<< "$KEEP"
+          git init -q "$RUNNER_TEMP/pages"
+          cd "$RUNNER_TEMP/pages"
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          gh auth setup-git
+          # Each attempt starts from the current branch tip, so a concurrent publish only costs a retry.
+          for attempt in 1 2 3; do
+            found=0
+            git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null || found=$?
+            if [ "$found" = 0 ]; then
+              git fetch -q --depth 1 origin "$BRANCH"
+              git checkout -q -f -B "$BRANCH" FETCH_HEAD
+              git clean -qfdx
+            elif [ "$found" = 2 ]; then
+              git checkout -q --orphan "$BRANCH"
+            else
+              echo "::error::Can't read $BRANCH"
+              exit 1
+            fi
+            mkdir -p "$DIRECTORY"
+            find "$DIRECTORY" -mindepth 1 -maxdepth 1 -print0 | while IFS= read -r -d '' path; do
+              name=${path##*/}
+              if [ "$name" != .git ] && ! grep -qxF -- "$name" <<< "$KEEP"; then rm -rf "$path"; fi
+            done
+            tar -C "$CONTENT" --exclude=.git -cf - . | tar -C "$DIRECTORY" -xf -
+            touch .nojekyll
+            git add -A
+            if git diff --cached --quiet; then
+              echo "::notice::Nothing changed"
+              break
+            fi
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -q -m "${MESSAGE:-Publish $DIRECTORY from ${GITHUB_SHA::7}}"
+            if git push -q origin "HEAD:refs/heads/$BRANCH"; then break; fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::Push to $BRANCH failed"
+              exit 1
+            fi
+          done
+          owner=$(tr '[:upper:]' '[:lower:]' <<< "$GITHUB_REPOSITORY_OWNER")
+          url="https://$owner.github.io/${GITHUB_REPOSITORY#*/}/"
+          if [ "$DIRECTORY" != . ]; then url="$url$DIRECTORY/"; fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Published to $url" >> "$GITHUB_STEP_SUMMARY"
