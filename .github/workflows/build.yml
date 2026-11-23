@@ -40,6 +40,18 @@ on:
       working-directory:
         type: string
         default: .
+      upload:
+        description: Path under working-directory to upload as an artifact named after the job, e.g. a site for pages.yml.
+        type: string
+        default: ''
+      build-cache:
+        description: Build tool cache under working-directory, e.g. `.angular/cache`. Needs Node; follows `cache`.
+        type: string
+        default: ''
+      build-cache-key:
+        description: Name shared by the jobs that reuse build-cache.
+        type: string
+        default: build
       fetch-depth:
         type: number
         default: 1
@@ -68,6 +80,8 @@ jobs:
       MODULE: ${{ matrix.module }}
       VERSION: ${{ inputs.version }}
       MAVEN_ARGS: -B -ntp
+      # renovate: datasource=npm depName=pnpm
+      PNPM_VERSION: 12.21.0
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
@@ -119,13 +133,17 @@ jobs:
             maven-${{ runner.os }}-
 
       # OS release and Node ABI in the node_modules key: native binaries depend on both.
-      - if: inputs.node-version != '' || inputs.node-version-file != ''
-        id: node
+      - id: node
+        if: inputs.node-version != '' || inputs.node-version-file != ''
         working-directory: ${{ inputs.working-directory }}
         env:
-          LOCK_HASH: ${{ hashFiles(format('{0}/yarn.lock', inputs.working-directory), format('{0}/package-lock.json', inputs.working-directory)) }}
-        run: |
-          if [ -f yarn.lock ]; then
+          LOCK_HASH: ${{ hashFiles(format('{0}/pnpm-lock.yaml', inputs.working-directory), format('{0}/yarn.lock', inputs.working-directory), format('{0}/package-lock.json', inputs.working-directory)) }}
+        # Exact pnpm version: npm never reuses a version number, and pnpm pins its platform binary.
+        run: | # zizmor: ignore[adhoc-packages]
+          if [ -f pnpm-lock.yaml ]; then
+            npm install -g --no-audit --no-fund "pnpm@$PNPM_VERSION"
+            pm=pnpm dir=$(pnpm store path)
+          elif [ -f yarn.lock ]; then
             pm=yarn dir=$(yarn cache dir)
           elif [ -f package-lock.json ]; then
             pm=npm dir=$(npm config get cache)
@@ -136,13 +154,16 @@ jobs:
           os="$ID$VERSION_ID-$RUNNER_ARCH"
           {
             echo "pm=$pm"
+            echo "os=$os"
+            echo "lock=$LOCK_HASH"
             echo "dir=$dir"
             echo "prefix=$pm-$os-"
             echo "key=$pm-$os-$LOCK_HASH"
             echo "modules-key=node-modules-$os-abi$(node -p process.versions.modules)-$LOCK_HASH"
           } >> "$GITHUB_OUTPUT"
 
-      # yarn only, npm ci deletes node_modules. Exact key only: a tree from another lockfile can keep stale packages.
+      # yarn only: npm ci deletes node_modules and pnpm links it fast from its store.
+      # Exact key only: a tree from another lockfile can keep stale packages.
       - if: steps.node.outputs.pm == 'yarn' && inputs.cache != 'none'
         id: node-modules
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -160,16 +181,17 @@ jobs:
           restore-keys: ${{ steps.node.outputs.prefix }}
 
       # Before env-vars are exported, so install scripts never see the secrets.
-      - if: steps.node.outputs.pm != ''
+      - id: install
+        if: steps.node.outputs.pm != ''
         working-directory: ${{ inputs.working-directory }}
         env:
           PM: ${{ steps.node.outputs.pm }}
         run: |
-          if [ "$PM" = yarn ]; then
-            yarn install --frozen-lockfile --non-interactive
-          else
-            npm ci --no-audit --no-fund
-          fi
+          case $PM in
+            pnpm) pnpm install --frozen-lockfile ;;
+            yarn) yarn install --frozen-lockfile --non-interactive ;;
+            *) npm ci --no-audit --no-fund ;;
+          esac
 
       - if: >-
           inputs.cache == 'save' && steps.node.outputs.pm == 'yarn' &&
@@ -188,6 +210,17 @@ jobs:
         with:
           path: ${{ steps.node.outputs.dir }}
           key: ${{ steps.node.outputs.key }}
+
+      # Keyed by commit: the save job refreshes it on every default-branch run, restores take the newest.
+      - if: inputs.build-cache != '' && inputs.cache != 'none' && steps.node.outputs.pm != ''
+        id: build-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ inputs.working-directory }}/${{ inputs.build-cache }}
+          key: ${{ inputs.build-cache-key }}-${{ steps.node.outputs.os }}-${{ steps.node.outputs.lock }}-${{ github.sha }}
+          restore-keys: |
+            ${{ inputs.build-cache-key }}-${{ steps.node.outputs.os }}-${{ steps.node.outputs.lock }}-
+            ${{ inputs.build-cache-key }}-${{ steps.node.outputs.os }}-
 
       - id: run
         working-directory: ${{ inputs.working-directory }}
@@ -210,6 +243,23 @@ jobs:
           done <<< "$ENV_VARS"
           unset ENV_VARS
           bash -eo pipefail -c "$RUN"
+
+      - if: >-
+          inputs.cache == 'save' && inputs.build-cache != '' && steps.node.outputs.pm != '' &&
+          steps.build-cache.outputs.cache-hit != 'true' &&
+          github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ inputs.working-directory }}/${{ inputs.build-cache }}
+          key: ${{ inputs.build-cache-key }}-${{ steps.node.outputs.os }}-${{ steps.node.outputs.lock }}-${{ github.sha }}
+
+      - if: inputs.upload != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.name }}${{ matrix.module != '' && format('-{0}', matrix.module) || '' }}
+          path: ${{ inputs.working-directory }}/${{ inputs.upload }}
+          if-no-files-found: error
+          retention-days: 5
 
       - if: >-
           inputs.cache == 'save' && steps.maven-key.outputs.key != '' &&
