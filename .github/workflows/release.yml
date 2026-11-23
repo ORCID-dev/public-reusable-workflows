@@ -1,0 +1,92 @@
+name: release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag to create, e.g. the `tag` output of version.yml.
+        type: string
+        required: true
+      previous-tag:
+        description: Where the generated notes start, e.g. `last-tag` from version.yml.
+        type: string
+        default: ''
+      slack-channel:
+        description: Channel to announce the release in. Needs the slack-token secret.
+        type: string
+        default: ''
+      timeout-minutes:
+        type: number
+        default: 10
+    secrets:
+      slack-token:
+        required: false
+    outputs:
+      url:
+        description: Release URL.
+        value: ${{ jobs.release.outputs.url }}
+
+permissions: {}
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    outputs:
+      url: ${{ steps.release.outputs.url }}
+    env:
+      # Slack channels are live: only the ORCID org announces.
+      HAS_SLACK: ${{ secrets.slack-token != '' && inputs.slack-channel != '' && github.repository_owner == 'ORCID' }}
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+
+      # Safe to re-run: an existing release on the same commit is left alone.
+      - id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+          PREVIOUS: ${{ inputs.previous-tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          if ! [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Invalid tag: $TAG"
+            exit 1
+          fi
+          notes=(--title "$TAG" --generate-notes)
+          if [ -n "$PREVIOUS" ] && gh api "repos/$GH_REPO/git/ref/tags/$PREVIOUS" > /dev/null 2>&1; then
+            notes+=(--notes-start-tag "$PREVIOUS")
+          fi
+          current=$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha 2> /dev/null || true)
+          if [ -z "$current" ]; then
+            gh release create "$TAG" --target "$SHA" "${notes[@]}"
+          elif [ "$current" != "$SHA" ]; then
+            echo "::error::$TAG already points to $current, not $SHA"
+            exit 1
+          elif gh release view "$TAG" > /dev/null 2>&1; then
+            echo "::notice::Release $TAG already exists"
+          else
+            gh release create "$TAG" --verify-tag "${notes[@]}"
+          fi
+          echo "url=$(gh release view "$TAG" --json url --jq .url)" >> "$GITHUB_OUTPUT"
+
+      # A failed announcement is a warning; the release stands.
+      - id: slack
+        if: env.HAS_SLACK == 'true'
+        env:
+          SLACK_TOKEN: ${{ secrets.slack-token }}
+          CHANNEL: ${{ inputs.slack-channel }}
+          TEXT: ${{ github.repository }} ${{ inputs.tag }} released ${{ steps.release.outputs.url }}
+        run: |
+          payload=$(jq -n --arg channel "$CHANNEL" --arg text "$TEXT" '{channel: $channel, text: $text}')
+          if ! response=$(curl -fsS --max-time 30 -H "Authorization: Bearer $SLACK_TOKEN" \
+            -H 'Content-Type: application/json; charset=utf-8' --data "$payload" https://slack.com/api/chat.postMessage); then
+            response='{"ok": false, "error": "request failed"}'
+          fi
+          if [ "$(jq -r .ok <<< "$response")" != true ]; then
+            echo "::warning::Slack notification failed: $(jq -r '.error // "unknown"' <<< "$response")"
+          fi
