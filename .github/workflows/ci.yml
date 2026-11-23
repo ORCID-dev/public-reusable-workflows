@@ -145,6 +145,7 @@ jobs:
       - run: bash tests/release.sh
       - run: bash tests/pages.sh
       - run: bash tests/transifex.sh
+      - run: bash tests/gate.sh
 
   zizmor:
     permissions:
@@ -168,3 +169,12 @@ jobs:
       - run: zizmor --format github .
         env:
           GH_TOKEN: ${{ github.token }}
+
+  # The one required check: it follows every job above, so adding or renaming a job never touches the branch rules.
+  ok:
+    if: always()
+    needs: [lint, sast, version, version-outputs, build, maven-cache, node-yarn, node-npm, node-pnpm, docker-jar, docker, test, zizmor]
+    permissions: {}
+    uses: ./.github/workflows/gate.yml # zizmor: ignore[self-repository]
+    with:
+      needs: ${{ toJSON(needs) }}
