@@ -1,0 +1,182 @@
+name: transifex
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: pull (download translations, open a PR) or push (upload source strings).
+        type: string
+        required: true
+      resource:
+        description: Transifex resource, e.g. orcid-angular.messages-xlf.
+        type: string
+        required: true
+      artifact:
+        description: push only. Artifact with the generated source files, e.g. from build.yml `upload`.
+        type: string
+        default: ''
+      artifact-path:
+        description: push only. Where the artifact goes, matching `source_file` in .tx/config.
+        type: string
+        default: .
+      branch:
+        description: pull only. Branch for the translations PR, force-pushed on every pull.
+        type: string
+        default: transifex
+      timeout-minutes:
+        type: number
+        default: 15
+    secrets:
+      transifex-token:
+        required: false
+      app-client-id:
+        description: pull only. GitHub App that pushes the branch and opens the PR, so its checks run.
+        required: false
+      app-private-key:
+        required: false
+
+permissions: {}
+
+jobs:
+  tx:
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    outputs:
+      changed: ${{ steps.pull.outputs.changed }}
+    env:
+      HAS_TOKEN: ${{ secrets.transifex-token != '' }}
+      TX_VERSION: v1.6.17
+      TX_SHA256: 002dec5b9e71248a7e6a0808118e9da940205828d5a33ce88e04bb57a967164d
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+
+      # Transifex is live: source strings are pushed only from the ORCID org.
+      - id: gate
+        env:
+          MODE: ${{ inputs.mode }}
+          RESOURCE: ${{ inputs.resource }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          if [ "$MODE" != pull ] && [ "$MODE" != push ]; then
+            echo "::error::Invalid mode: $MODE"
+            exit 1
+          fi
+          if ! [[ $RESOURCE =~ ^[A-Za-z0-9_][A-Za-z0-9._-]*$ ]]; then
+            echo "::error::Invalid resource: $RESOURCE"
+            exit 1
+          fi
+          run=true
+          if [ "$HAS_TOKEN" != true ]; then
+            echo "::notice::No Transifex token, skipped"
+            run=false
+          elif [ "$MODE" = push ] && [ "$OWNER" != ORCID ]; then
+            echo "::notice::Source strings are pushed only from the ORCID org"
+            run=false
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: steps.gate.outputs.run == 'true' && inputs.mode == 'push'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.artifact }}
+          path: ${{ inputs.artifact-path }}
+
+      - id: install
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/tx.tar.gz" \
+            "https://github.com/transifex/cli/releases/download/$TX_VERSION/tx-linux-amd64.tar.gz"
+          echo "$TX_SHA256  $RUNNER_TEMP/tx.tar.gz" | sha256sum --check --quiet -
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/tx.tar.gz" -C "$RUNNER_TEMP/bin" tx
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - id: pull
+        if: steps.gate.outputs.run == 'true' && inputs.mode == 'pull'
+        env:
+          TX_TOKEN: ${{ secrets.transifex-token }}
+          RESOURCE: ${{ inputs.resource }}
+        run: |
+          tx pull --all --force --minimum-perc=0 -r "$RESOURCE"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git diff --cached --binary > "$RUNNER_TEMP/translations.patch"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.pull.outputs.changed == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: transifex-patch
+          path: ${{ runner.temp }}/translations.patch
+          retention-days: 5
+
+      - id: push
+        if: steps.gate.outputs.run == 'true' && inputs.mode == 'push'
+        env:
+          TX_TOKEN: ${{ secrets.transifex-token }}
+          RESOURCE: ${{ inputs.resource }}
+        run: tx push --source -r "$RESOURCE"
+
+  pr:
+    needs: tx
+    if: needs.tx.outputs.changed == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: transifex-patch
+          path: ${{ runner.temp }}/patch
+
+      # Applies the patch only: no project code runs with the app token.
+      - id: open
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          SLUG: ${{ steps.app.outputs.app-slug }}
+          BRANCH: ${{ inputs.branch }}
+          RESOURCE: ${{ inputs.resource }}
+        run: |
+          base=$(gh repo view "$GITHUB_REPOSITORY" --json defaultBranchRef --jq .defaultBranchRef.name)
+          if ! [[ $BRANCH =~ ^[A-Za-z0-9_][A-Za-z0-9._/-]*$ ]] || [ "$BRANCH" = "$base" ]; then
+            echo "::error::Invalid branch: $BRANCH"
+            exit 1
+          fi
+          git checkout -q -B "$BRANCH"
+          git apply --index "$RUNNER_TEMP/patch/translations.patch"
+          git -c user.name="${SLUG}[bot]" -c user.email="${SLUG}[bot]@users.noreply.github.com" \
+            commit -q -m "chore(i18n): pull $RESOURCE translations"
+          gh auth setup-git
+          git push -q --force origin "HEAD:refs/heads/$BRANCH"
+          if [ -z "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')" ]; then
+            gh pr create --base "$base" --head "$BRANCH" --title "chore(i18n): update $RESOURCE translations" --body ""
+          fi
