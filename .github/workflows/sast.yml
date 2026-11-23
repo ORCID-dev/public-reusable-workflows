@@ -35,6 +35,8 @@ jobs:
       SEMGREP_VERSION: 1.186.0
       # renovate: datasource=maven depName=org.apache.maven.plugins:maven-dependency-plugin
       DEPENDENCY_PLUGIN_VERSION: 3.11.0
+      # Central answers 429 to shared runner IPs. Resolver waits 5 s x n between retries, so the default 3 give up after 30 s.
+      MAVEN_OPTS: -Daether.transport.http.retryHandler.count=10
       HAS_TOKEN: ${{ secrets.semgrep-app-token != '' }}
     steps:
       - uses: step-security/harden-runner@aebdcf6156ab6691adf63218240e476564a1ed4c # v2.23.0
