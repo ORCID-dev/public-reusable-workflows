@@ -54,6 +54,7 @@ jobs:
       name: build
       modules: '["lib", "app"]'
       java-version: '21'
+      upload: fixtures/maven/{module}/target/*.jar
       run: |
         test -n "$FIXTURE_TOKEN"
         mvn -f fixtures/maven/pom.xml -pl "$MODULE" -am verify
@@ -102,6 +103,17 @@ jobs:
       cache: save
       working-directory: fixtures/node-pnpm
       run: test "$(node -p "require('ms')(60000)")" = 1m
+
+  # The jar of one module goes into an image, the way member-services does it.
+  docker-jar:
+    needs: build
+    permissions:
+      contents: read
+    uses: ./.github/workflows/docker.yml # zizmor: ignore[self-repository]
+    with:
+      name: docker-jar
+      images: '[{"name": "fixture/jar", "context": "fixtures/docker-jar", "artifact": "build-app", "artifact-path": "fixtures/docker-jar/target"}]'
+      version: 0.0.0
 
   docker:
     permissions:
