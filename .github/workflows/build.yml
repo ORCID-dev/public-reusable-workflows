@@ -19,6 +19,7 @@ on:
         type: boolean
         default: true
       version:
+        description: Exported as VERSION.
         type: string
         default: ''
       java-version:

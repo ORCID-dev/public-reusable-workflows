@@ -13,10 +13,13 @@ on:
         default: patch
     outputs:
       version:
+        description: Version to release, e.g. 3.25.11.
         value: ${{ jobs.version.outputs.version }}
       tag:
+        description: Its tag, e.g. v3.25.11.
         value: ${{ jobs.version.outputs.tag }}
       last-tag:
+        description: Latest existing tag, e.g. v3.25.10.
         value: ${{ jobs.version.outputs.last-tag }}
 
 permissions: {}
