@@ -28,4 +28,18 @@ check "invalid key" $'::error::env-vars line 1 is not KEY=value\nexit 1' '1A=x' 
 check "pipefail" 'exit 1' '' 'false | true; echo after'
 check "exit status" 'exit 3' '' 'exit 3'
 
+upload=$(python3 "$root/tests/extract-run.py" "$root/.github/workflows/build.yml" upload-path)
+path_for() { # path_for <working-directory> <upload> <module>; prints the step output and, on failure, its exit status
+  DIR=$1 UPLOAD=$2 MODULE=$3 GITHUB_OUTPUT=/dev/stdout bash -e -c "$upload" 2>&1 || echo "exit $?"
+}
+same() { # same <name> <want> <got>
+  if [ "$3" = "$2" ]; then echo "ok   $1"; else printf 'FAIL %s\n--- got\n%s\n--- want\n%s\n' "$1" "$3" "$2"; failed=1; fi
+}
+same "upload: module placeholder" 'path=./fixtures/maven/app/target/*.jar' "$(path_for . 'fixtures/maven/{module}/target/*.jar' app)"
+same "upload: working directory" 'path=ui/dist' "$(path_for ui dist '')"
+same "upload: default directory" 'path=./dist' "$(path_for . dist '')"
+same "upload: module with a dot" 'path=./a.b/target/*.jar' "$(path_for . '{module}/target/*.jar' a.b)"
+same "upload: nested module" 'path=./services/api/target/*.jar' "$(path_for . '{module}/target/*.jar' services/api)"
+same "upload: invalid module" $'::error::Invalid module: a b\nexit 1' "$(path_for . '{module}/target/*.jar' 'a b')"
+
 exit "$failed"

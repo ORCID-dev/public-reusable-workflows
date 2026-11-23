@@ -42,7 +42,7 @@ on:
         type: string
         default: .
       upload:
-        description: Path under working-directory to upload as an artifact named after the job, e.g. a site for pages.yml.
+        description: Path or glob under working-directory to upload as an artifact named after the job, e.g. a site for pages.yml. {module} is replaced with the matrix entry. The artifact root is the directory before the first wildcard.
         type: string
         default: ''
       build-cache:
@@ -256,11 +256,24 @@ jobs:
           path: ${{ inputs.working-directory }}/${{ inputs.build-cache }}
           key: ${{ inputs.build-cache-key }}-${{ steps.node.outputs.os }}-${{ steps.node.outputs.lock }}-${{ github.sha }}
 
+      # tests/build.sh runs this script; keep the id and the block scalar.
+      - id: upload-path
+        if: inputs.upload != ''
+        env:
+          DIR: ${{ inputs.working-directory }}
+          UPLOAD: ${{ inputs.upload }}
+        run: |
+          if ! [[ $MODULE =~ ^[A-Za-z0-9._/-]*$ ]]; then
+            echo "::error::Invalid module: $MODULE"
+            exit 1
+          fi
+          echo "path=$DIR/${UPLOAD//\{module\}/$MODULE}" >> "$GITHUB_OUTPUT"
+
       - if: inputs.upload != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.name }}${{ matrix.module != '' && format('-{0}', matrix.module) || '' }}
-          path: ${{ inputs.working-directory }}/${{ inputs.upload }}
+          path: ${{ steps.upload-path.outputs.path }}
           if-no-files-found: error
           retention-days: 5
 

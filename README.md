@@ -147,6 +147,7 @@ jobs:
 ## Good to know
 
 - Node dependencies are installed from the lockfile before `run`.
+- `upload` is a path or glob under `working-directory`, and `{module}` stands for the matrix entry. The artifact starts at the directory before the first wildcard, so `{module}/target/*.jar` restores into `<module>/target`.
 - Caches are saved only by the job with `cache: save`, on the default branch.
 - Secrets for `run` go in `env-vars` as `KEY=value` lines. They are masked.
 - Outside the ORCID org, images go under `vd_test/`, and Slack and Transifex pushes are skipped.
