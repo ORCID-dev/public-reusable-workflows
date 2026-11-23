@@ -81,6 +81,8 @@ jobs:
       MODULE: ${{ matrix.module }}
       VERSION: ${{ inputs.version }}
       MAVEN_ARGS: -B -ntp
+      # Central answers 429 to shared runner IPs. Resolver waits 5 s x n between retries, so the default 3 give up after 30 s.
+      MAVEN_OPTS: -Daether.transport.http.retryHandler.count=10
       # renovate: datasource=npm depName=pnpm
       PNPM_VERSION: 12.21.0
     steps:
