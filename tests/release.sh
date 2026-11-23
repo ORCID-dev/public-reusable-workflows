@@ -15,7 +15,9 @@ cat > "$work/gh" <<'EOF'
 #!/usr/bin/env bash
 case "$1 $2" in
   "api repos/o/r/git/ref/tags/"*) [ "${FAKE_PREV:-0}" = 1 ] ;;
-  "api repos/o/r/commits/"*) [ -n "${FAKE_TAG_SHA:-}" ] && echo "$FAKE_TAG_SHA" ;;
+  "api repos/o/r/commits/"*)
+    # Like the real gh: an unknown tag is a 422 with the error body on stdout and exit status 1.
+    if [ -n "${FAKE_TAG_SHA:-}" ]; then echo "$FAKE_TAG_SHA"; else echo "{\"message\":\"No commit found for SHA: ${2##*/}\",\"status\":\"422\"}"; exit 1; fi ;;
   "release view")
     if [ "$4" = --json ]; then echo "https://example.test/releases/$3"; else [ "${FAKE_RELEASE:-0}" = 1 ]; fi ;;
   "release create") shift 2; echo "create $*" >> "$FAKE_LOG" ;;
